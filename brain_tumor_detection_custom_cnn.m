@@ -96,7 +96,7 @@ disp(options);
 % Hiperparametre tablosu oluşturma
 hyperParams = {
     'Loss function'                         'Categorical Cross-Entropy'
-    'Number of epochs the model trained for' 10
+    'Number of epochs the model trained for' 12
     'Batch size'                            64
     'Optimization algorithm'                'Adam'
     'Learning rate'                         '5 × 10⁻³'
