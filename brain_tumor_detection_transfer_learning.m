@@ -50,6 +50,22 @@ lgraph = addLayers(lgraph, newLayers);
 % Katmanları bağlama
 lgraph = connectLayers(lgraph, 'global_average_pooling2d_1', 'new_fc');
 
+% Analyze Network Architecture (Opens a new window)
+disp('Analyzing network architecture...');
+analyzeNetwork(lgraph);
+disp('Network analysis window opened.');
+
+% Open Network in Deep Network Designer (Opens the App)
+disp('Opening Deep Network Designer...');
+try
+    deepNetworkDesigner(lgraph);
+    disp('Deep Network Designer launched with the defined layers.');
+    disp('Use the "Analyze" button within the app for further details.');
+catch ME
+    warning('Could not automatically open Deep Network Designer. Error: %s', ME.message);
+    disp('You can still manually open Deep Network Designer from the MATLAB Apps tab and import the `layers` variable.');
+end
+
 % Eğitim seçenekleri
 options = trainingOptions('adam',...
     'InitialLearnRate', 0.0001,...
@@ -61,8 +77,18 @@ options = trainingOptions('adam',...
     'Plots','training-progress',...
     'MiniBatchSize', 16);
 
+% Display Training Options (Hyperparameters) in Command Window
+disp('--- Training Options (Hyperparameters) ---');
+disp(options);
+disp('------------------------------------------');
+
 % Modeli eğitme
 [net, trainInfo] = trainNetwork(augmentedImdsTrain, lgraph, options);
+
+% trainInfo
+disp('--- trainInfo ---');
+disp(trainInfo);
+disp('------------------------------------------');
 
 % Modeli kaydetme
 save('brain_tumor_model_mobilenetv2.mat', 'net', 'inputSize', 'classNames');
@@ -72,3 +98,32 @@ YPred = classify(net, augmentedImdsValidation);
 YValidation = imdsValidation.Labels;
 accuracy = sum(YPred == YValidation)/numel(YValidation);
 disp(['Validation Accuracy: ', num2str(accuracy*100), '%']);
+
+% Test seti için ön işleme (görüntü boyutlandırma ve gri -> RGB dönüşüm)
+augmentedImdsTest = augmentedImageDatastore(inputSize(1:2), imdsTest, ...
+    'ColorPreprocessing','gray2rgb');
+
+% Test verisinde sınıflandırma
+YPredTest = classify(net, augmentedImdsTest);
+YTest = imdsTest.Labels;
+
+% Doğruluk hesaplama
+testAccuracy = sum(YPredTest == YTest)/numel(YTest);
+disp(['Test Accuracy: ', num2str(testAccuracy*100), '%']);
+
+% Konfüzyon matrisi oluşturma
+confMat = confusionmat(YTest, YPredTest);
+
+% Konfüzyon matrisini görselleştirme
+figure;
+confusionchart(YTest, YPredTest, ...
+    'Title', 'Confusion Matrix for Test Data', ...
+    'RowSummary','row-normalized', ...
+    'ColumnSummary','column-normalized');
+
+% Konfüzyon matrisini tablo olarak yazdırma
+disp('Confusion Matrix Table:');
+confTable = array2table(confMat, ...
+    'VariableNames', strcat("Pred_", string(classNames)), ...
+    'RowNames', strcat("Actual_", string(classNames)));
+disp(confTable);
