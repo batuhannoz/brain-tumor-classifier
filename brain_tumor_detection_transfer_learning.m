@@ -80,6 +80,33 @@ options = trainingOptions('adam',...
 % Display Training Options (Hyperparameters) in Command Window
 disp('--- Training Options (Hyperparameters) ---');
 disp(options);
+% Hiperparametre tablosu oluşturma
+hyperParams = {
+    'Loss function'                         'Categorical Cross-Entropy'
+    'Number of epochs the model trained for' 10
+    'Batch size'                            64
+    'Optimization algorithm'                'Adam'
+    'Learning rate'                         '5 × 10⁻³'
+    'Activation function of the Dense layer' 'Softmax'
+    'Number of units of the Dense layer'     10
+    'Validation set fraction'                0.2
+};
+
+% Tablo için figure penceresi
+f3 = figure('Name','Hiperparametreler','Position',[100 100 600 250]);
+uit = uitable(f3);
+uit.Data = hyperParams;
+uit.ColumnName = {'Hyper-parameter', 'Value'};
+uit.Position = [0 0 600 250];
+uit.ColumnWidth = {400 150};
+
+% Hücre içeriklerini ortala
+uit.ColumnFormat = {'char', 'char'};
+uit.RowStriping = 'on';
+
+% Tablo başlık ayarı
+uit.FontName = 'Consolas';
+uit.FontSize = 12;
 disp('------------------------------------------');
 
 % Modeli eğitme
