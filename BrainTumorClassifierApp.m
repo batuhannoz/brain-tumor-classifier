@@ -9,20 +9,20 @@ classdef BrainTumorClassifierApp < matlab.apps.AppBase
         ClassifyButton      matlab.ui.control.Button
         UIAxes              matlab.ui.control.UIAxes
         ResultLabel         matlab.ui.control.Label
-        ConfidenceLabel    matlab.ui.control.Label
+        ConfidenceLabel     matlab.ui.control.Label
     end
 
     properties (Access = private)
-        currentModel % Seçilen model
-        imageData    % Yüklenen görüntü verisi
-        modelNames   % Mevcut model listesi
-        modelPath = pwd % Model dosyalarının konumu
+        currentModel
+        originalImage   % Original loaded image
+        processedImage  % Preprocessed image
+        modelNames
+        modelPath = pwd
     end
 
     methods (Access = private)
         
         function detectAvailableModels(app)
-            % Brain_tumor ile başlayan .mat dosyalarını bul
             files = dir(fullfile(app.modelPath, 'brain_tumor*.mat'));
             app.modelNames = {files.name};
             
@@ -37,14 +37,13 @@ classdef BrainTumorClassifierApp < matlab.apps.AppBase
         end
         
         function loadSelectedModel(app)
-            % Seçilen modeli yükle
             selectedModel = app.ModelDropDown.Value;
             try
                 loadedData = load(fullfile(app.modelPath, selectedModel));
-                if isfield(loadedData, 'net')
+                if isfield(loadedData, 'trainedNet') % Eğitim kodundaki değişken adı
+                    app.currentModel = loadedData.trainedNet;
+                elseif isfield(loadedData, 'net')
                     app.currentModel = loadedData.net;
-                elseif isfield(loadedData, 'lgraph')
-                    app.currentModel = loadedData.lgraph;
                 else
                     error('Geçersiz model formatı');
                 end
@@ -55,92 +54,109 @@ classdef BrainTumorClassifierApp < matlab.apps.AppBase
         end
         
         function preprocessImage(app)
-            % Görüntüyü model giriş boyutuna getir
-            targetSize = [224 224 3]; % Varsayılan boyut
-            
-            if isa(app.currentModel, 'SeriesNetwork') || isa(app.currentModel, 'DAGNetwork')
-                inputLayer = app.currentModel.Layers(1);
-                targetSize = inputLayer.InputSize;
+            % Ensure a model is loaded and has Layers property
+            if isempty(app.currentModel) || ~isprop(app.currentModel, 'Layers')
+                uialert(app.UIFigure, 'Model not loaded or invalid.', 'Error');
+                app.processedImage = []; % Clear processed image
+                return;
             end
-            
-            % Görüntüyü yeniden boyutlandır ve normalize et
-            resizedImg = imresize(app.imageData, targetSize(1:2));
-            if size(resizedImg,3) == 1 % Grayscale ise RGB'ye çevir
-                resizedImg = repmat(resizedImg, 1, 1, 3);
+
+            % Ensure an original image is loaded
+             if isempty(app.originalImage)
+                 uialert(app.UIFigure, 'Load an image first.', 'Error');
+                 app.processedImage = []; % Clear processed image
+                 return;
+             end
+
+            try
+                % Get the expected input size from the loaded model's first layer
+                % This assumes the first layer is the image input layer
+                inputSize = app.currentModel.Layers(1).InputSize;
+
+                % Check if inputSize is valid (should have at least 2 elements)
+                if numel(inputSize) < 2
+                   error('Invalid model input size detected.');
+                end
+
+                targetSize = inputSize(1:2); % Get Height and Width for resizing
+
+                % --- Preprocessing Steps ---
+                % 1. Resize the original image to the target size
+                resizedImage = imresize(app.originalImage, targetSize);
+
+                % 2. Ensure the image has 3 channels (RGB)
+                % Mimic the 'gray2rgb' behavior used during training if the input is grayscale
+                if size(resizedImage, 3) == 1
+                    % If grayscale, replicate the single channel three times
+                    app.processedImage = cat(3, resizedImage, resizedImage, resizedImage);
+                elseif size(resizedImage, 3) == 3
+                    % If already 3 channels (assume RGB), use it directly
+                    app.processedImage = resizedImage;
+                else
+                    % Handle other cases if necessary (e.g., RGBA with 4 channels)
+                    % For now, we assume input is either grayscale or RGB.
+                    error('Unsupported image format: Image must be grayscale or RGB.');
+                end
+
+                % --- End of Preprocessing ---
+
+                % Optional: You could display the processed image in another axes for debugging
+                % imshow(app.processedImage, 'Parent', app.SomeOtherUIAxes);
+
+            catch ME
+                uialert(app.UIFigure, ['Image preprocessing failed: ' ME.message], 'Preprocessing Error');
+                app.processedImage = []; % Clear processed image on error to prevent issues
             end
-            app.imageData = im2single(resizedImg); % Normalizasyon
         end
     end
 
     % Callbacks that handle component events
     methods (Access = private)
 
-        % Code that executes after component creation
         function startupFcn(app)
-            % Modelleri tara
             detectAvailableModels(app);
-            
-            % GUI elementlerini ayarla
             app.UIFigure.Name = 'Beyin Tümörü Sınıflandırıcı';
             app.ResultLabel.Text = 'Sonuç: -';
             app.ConfidenceLabel.Text = 'Güven: -';
         end
 
-        % Dropdown değiştiğinde çağrılır
         function ModelDropDownValueChanged(app, event)
             app.loadSelectedModel();
         end
 
-        % Görüntü yükleme butonu
         function LoadImageButtonPushed(app, event)
-            [file, path] = uigetfile({'*.jpg;*.png;*.jpeg', 'Image Files'});
+            [file, path] = uigetfile({'*.jpg;*.png;*.jpeg;*.tif;*.tiff', 'Image Files'});
             if file
                 fullpath = fullfile(path, file);
                 try
-                    app.imageData = imread(fullpath);
-                    imshow(app.imageData, 'Parent', app.UIAxes);
-                    app.ResultLabel.Text = 'Sonuç: -';
-                    app.ConfidenceLabel.Text = 'Güven: -';
+                    app.originalImage = imread(fullpath);
+                    imshow(app.originalImage, 'Parent', app.UIAxes);
+                    app.ResultLabel.Text = 'Result: -';
+                    app.ConfidenceLabel.Text = 'Confidence: -';
                 catch ME
-                    uialert(app.UIFigure, ME.message, 'Görüntü Yükleme Hatası');
+                    uialert(app.UIFigure, ME.message, 'Image Load Error');
                 end
             end
         end
 
-        % Sınıflandırma butonu
         function ClassifyButtonPushed(app, event)
-            if isempty(app.imageData)
-                uialert(app.UIFigure, 'Önce görüntü yükleyin!', 'Uyarı');
+            if isempty(app.originalImage)
+                uialert(app.UIFigure, 'Load an image first!', 'Warning');
                 return;
             end
-            
-            if isempty(app.currentModel)
-                uialert(app.UIFigure, 'Önce model seçin!', 'Uyarı');
-                return;
-            end
-            
+
             try
-                % Ön işleme
+                % Preprocess and classify
                 preprocessImage(app);
-                
-                % Tahmin yap
-                [label, scores] = classify(app.currentModel, app.imageData);
-                [~, idx] = max(scores);
-                confidence = scores(idx);
-                
-                % Sonuçları göster
-                app.ResultLabel.Text = ['Sonuç: ' char(label)];
-                app.ConfidenceLabel.Text = sprintf('Güven: %.2f%%', confidence*100);
-                
-                % Renk kodlama
-                if strcmpi(char(label), 'yes')
-                    app.ResultLabel.FontColor = [1 0 0]; % Kırmızı
-                else
-                    app.ResultLabel.FontColor = [0 0.7 0]; % Yeşil
-                end
-                
+                [label, scores] = classify(app.currentModel, app.processedImage);
+                confidence = max(scores);
+
+                % Display results
+                app.ResultLabel.Text = ['Result: ' char(label)];
+                app.ConfidenceLabel.Text = sprintf('Confidence: %.2f%%', confidence*100);
+                imshow(app.originalImage, 'Parent', app.UIAxes); % Show original image
             catch ME
-                uialert(app.UIFigure, ME.message, 'Sınıflandırma Hatası');
+                uialert(app.UIFigure, ME.message, 'Classification Error');
             end
         end
     end
@@ -148,48 +164,38 @@ classdef BrainTumorClassifierApp < matlab.apps.AppBase
     % App initialization and construction
     methods (Access = private)
 
-        % Create UIFigure and components
         function createComponents(app)
-
-            % Create UIFigure
             app.UIFigure = uifigure;
             app.UIFigure.Position = [100 100 800 600];
             app.UIFigure.Color = [0.95 0.95 0.95];
 
-            % Create ModelDropDownLabel
             app.ModelDropDownLabel = uilabel(app.UIFigure);
             app.ModelDropDownLabel.HorizontalAlignment = 'right';
             app.ModelDropDownLabel.Position = [50 550 100 22];
             app.ModelDropDownLabel.Text = 'Model Seçin:';
 
-            % Create ModelDropDown
             app.ModelDropDown = uidropdown(app.UIFigure);
             app.ModelDropDown.Position = [165 550 200 22];
             app.ModelDropDown.ValueChangedFcn = createCallbackFcn(app, @ModelDropDownValueChanged, true);
 
-            % Create LoadImageButton
             app.LoadImageButton = uibutton(app.UIFigure, 'push');
             app.LoadImageButton.ButtonPushedFcn = createCallbackFcn(app, @LoadImageButtonPushed, true);
             app.LoadImageButton.Position = [400 545 100 30];
             app.LoadImageButton.Text = 'Görüntü Yükle';
 
-            % Create ClassifyButton
             app.ClassifyButton = uibutton(app.UIFigure, 'push');
             app.ClassifyButton.ButtonPushedFcn = createCallbackFcn(app, @ClassifyButtonPushed, true);
             app.ClassifyButton.Position = [520 545 100 30];
             app.ClassifyButton.Text = 'Sınıflandır';
 
-            % Create UIAxes
             app.UIAxes = uiaxes(app.UIFigure);
             app.UIAxes.Position = [50 150 700 380];
 
-            % Create ResultLabel
             app.ResultLabel = uilabel(app.UIFigure);
             app.ResultLabel.FontSize = 16;
             app.ResultLabel.Position = [50 100 300 30];
             app.ResultLabel.Text = 'Sonuç: -';
 
-            % Create ConfidenceLabel
             app.ConfidenceLabel = uilabel(app.UIFigure);
             app.ConfidenceLabel.FontSize = 16;
             app.ConfidenceLabel.Position = [50 70 300 30];
@@ -198,18 +204,10 @@ classdef BrainTumorClassifierApp < matlab.apps.AppBase
     end
 
     methods (Access = public)
-
-        % Construct app
         function app = BrainTumorClassifierApp
-            % Create and configure components
             createComponents(app)
-
-            % Register the app with App Designer
             registerApp(app, app.UIFigure)
-
-            % Execute the startup function
             runStartupFcn(app, @startupFcn)
-
             if nargout == 0
                 clear app
             end
