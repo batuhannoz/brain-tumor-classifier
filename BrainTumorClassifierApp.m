@@ -1,6 +1,5 @@
 classdef BrainTumorClassifierApp < matlab.apps.AppBase
 
-    % Properties that correspond to app components
     properties (Access = public)
         UIFigure            matlab.ui.Figure
         ModelDropDownLabel  matlab.ui.control.Label
@@ -14,8 +13,8 @@ classdef BrainTumorClassifierApp < matlab.apps.AppBase
 
     properties (Access = private)
         currentModel
-        originalImage   % Original loaded image
-        processedImage  % Preprocessed image
+        originalImage   
+        processedImage  
         modelNames
         modelPath = pwd
     end
@@ -54,54 +53,36 @@ classdef BrainTumorClassifierApp < matlab.apps.AppBase
         end
         
         function preprocessImage(app)
-            % Ensure a model is loaded and has Layers property
             if isempty(app.currentModel) || ~isprop(app.currentModel, 'Layers')
                 uialert(app.UIFigure, 'Model not loaded or invalid.', 'Error');
-                app.processedImage = []; % Clear processed image
+                app.processedImage = []; 
                 return;
             end
 
-            % Ensure an original image is loaded
              if isempty(app.originalImage)
                  uialert(app.UIFigure, 'Load an image first.', 'Error');
-                 app.processedImage = []; % Clear processed image
+                 app.processedImage = []; 
                  return;
              end
 
             try
-                % Get the expected input size from the loaded model's first layer
-                % This assumes the first layer is the image input layer
                 inputSize = app.currentModel.Layers(1).InputSize;
 
-                % Check if inputSize is valid (should have at least 2 elements)
                 if numel(inputSize) < 2
                    error('Invalid model input size detected.');
                 end
 
-                targetSize = inputSize(1:2); % Get Height and Width for resizing
+                targetSize = inputSize(1:2);
 
-                % --- Preprocessing Steps ---
-                % 1. Resize the original image to the target size
                 resizedImage = imresize(app.originalImage, targetSize);
 
-                % 2. Ensure the image has 3 channels (RGB)
-                % Mimic the 'gray2rgb' behavior used during training if the input is grayscale
                 if size(resizedImage, 3) == 1
-                    % If grayscale, replicate the single channel three times
                     app.processedImage = cat(3, resizedImage, resizedImage, resizedImage);
                 elseif size(resizedImage, 3) == 3
-                    % If already 3 channels (assume RGB), use it directly
                     app.processedImage = resizedImage;
                 else
-                    % Handle other cases if necessary (e.g., RGBA with 4 channels)
-                    % For now, we assume input is either grayscale or RGB.
                     error('Unsupported image format: Image must be grayscale or RGB.');
                 end
-
-                % --- End of Preprocessing ---
-
-                % Optional: You could display the processed image in another axes for debugging
-                % imshow(app.processedImage, 'Parent', app.SomeOtherUIAxes);
 
             catch ME
                 uialert(app.UIFigure, ['Image preprocessing failed: ' ME.message], 'Preprocessing Error');
@@ -110,7 +91,6 @@ classdef BrainTumorClassifierApp < matlab.apps.AppBase
         end
     end
 
-    % Callbacks that handle component events
     methods (Access = private)
 
         function startupFcn(app)
