@@ -5,6 +5,7 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
         UIFigure               matlab.ui.Figure
         LoadImageButton        matlab.ui.control.Button
         DetectTumorsButton     matlab.ui.control.Button
+        SegmentTumorButton     matlab.ui.control.Button
         UIAxes                 matlab.ui.control.UIAxes
         StatusLabel            matlab.ui.control.Label
     end
@@ -16,6 +17,10 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
         modelPath = pwd        % Path to the model directory (current directory by default)
         modelFileName = 'trainedYOLOv2TumorDetector.mat' % Name of the model file
         inputSize = [224 224 3]; % Expected input size for the YOLOv2 model
+        medSAM                 % MedSAM model for segmentation
+        tumorMask              % Stores the segmentation mask
+        detectedBbox           % Stores the detected bounding box
+        imageEmbeddings        % Stores image embeddings for MedSAM
     end
 
     methods (Access = private)
@@ -26,11 +31,19 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
             app.StatusLabel.Text = 'Durum: Model yükleniyor...';
             drawnow; % Update UI
             loadYOLOv2Model(app);
-            if ~isempty(app.yoloDetector)
-                app.StatusLabel.Text = 'Durum: Model yüklendi. Lütfen bir görüntü yükleyin.';
-            else
-                app.StatusLabel.Text = 'Durum: Model yüklenemedi. Lütfen dosyayı kontrol edin.';
+            initializeMedSAM(app);
+            if ~isempty(app.yoloDetector) && ~isempty(app.medSAM)
+                app.StatusLabel.Text = 'Durum: Modeller yüklendi. Lütfen bir görüntü yükleyin.';
+            elseif isempty(app.medSAM)
+                app.StatusLabel.Text = 'Durum: MedSAM modeli yüklenemedi. YOLOv2 model yüklendi.';
+                app.SegmentTumorButton.Enable = 'off';
+            elseif isempty(app.yoloDetector)
+                app.StatusLabel.Text = 'Durum: YOLOv2 modeli yüklenemedi. MedSAM model yüklendi.';
                 app.DetectTumorsButton.Enable = 'off'; % Disable button if model fails to load
+            else
+                app.StatusLabel.Text = 'Durum: Modeller yüklenemedi. Lütfen dosyaları kontrol edin.';
+                app.DetectTumorsButton.Enable = 'off';
+                app.SegmentTumorButton.Enable = 'off';
             end
         end
 
@@ -72,6 +85,25 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
                 app.yoloDetector = [];
             end
         end
+        
+        % Function to initialize the MedSAM model
+        function initializeMedSAM(app)
+            try
+                % Check if Medical Imaging Toolbox is available
+                if ~exist('medicalSegmentAnythingModel', 'file')
+                    warning('Medical Imaging Toolbox ile MedSAM modeli bulunamadı.');
+                    app.medSAM = [];
+                    return;
+                end
+                
+                % Initialize Medical Segment Anything Model
+                app.medSAM = medicalSegmentAnythingModel;
+                disp('MedSAM modeli başarıyla yüklendi.');
+            catch ME
+                warning(['MedSAM modeli yüklenirken hata oluştu: ' ME.message]);
+                app.medSAM = [];
+            end
+        end
 
         % Function to preprocess the image for the YOLOv2 detector
         function preprocessImageForDetection(app)
@@ -84,10 +116,10 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
             try
                 % Görüntü boyutlarını saklayın ki orijinal görüntüye geri dönüştürebilesiniz
                 [height, width, channels] = size(app.originalImage);
-                
+
                 % YOLOv2 modelin beklediği giriş boyutuna göre yeniden boyutlandır
                 resizedImage = imresize(app.originalImage, app.inputSize(1:2));
-        
+
                 % Resim RGB değilse RGB'ye dönüştür
                 if size(resizedImage, 3) == 1
                     app.processedImage = cat(3, resizedImage, resizedImage, resizedImage);
@@ -96,17 +128,111 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
                 else
                     error('Desteklenmeyen görüntü formatı: Görüntü gri tonlamalı veya RGB olmalıdır.');
                 end
-                
+
                 % Hazırlanan görüntünün boyutlarının model beklentisine uyduğundan emin olun
                 if ~isequal(size(app.processedImage), app.inputSize)
                     warning('İşlenen görüntü, modelin beklediği boyutla eşleşmiyor. Boyutlar: %s vs %s', ...
                             mat2str(size(app.processedImage)), mat2str(app.inputSize));
                 end
-                
+
             catch ME
                 uialert(app.UIFigure, ['Görüntü ön işleme hatası: ' ME.message], 'Ön İşleme Hatası');
                 app.processedImage = [];
             end
+        end
+        
+        % Function to segment tumor using MedSAM
+        function segmentTumorWithMedSAM(app)
+            if isempty(app.originalImage)
+                uialert(app.UIFigure, 'Lütfen önce bir görüntü yükleyin!', 'Uyarı');
+                return;
+            end
+        
+            if isempty(app.medSAM)
+                uialert(app.UIFigure, 'MedSAM modeli yüklenemedi. Lütfen modeli kontrol edin.', 'Hata');
+                return;
+            end
+            
+            if isempty(app.detectedBbox)
+                uialert(app.UIFigure, 'Önce tumor tespiti yapmalısınız.', 'Uyarı');
+                return;
+            end
+        
+            app.StatusLabel.Text = 'Durum: Tümör segmente ediliyor...';
+            drawnow;
+        
+            try
+                % Prepare the image for MedSAM if needed
+                imageToSegment = app.originalImage;
+                if size(imageToSegment, 3) == 1
+                    imageToSegment = cat(3, imageToSegment, imageToSegment, imageToSegment);
+                end
+                
+                % Extract image size for segmentation
+                imageSize = size(imageToSegment);
+                imageSize = imageSize(1:2);
+                
+                % Extract embeddings from the image
+                app.imageEmbeddings = extractEmbeddings(app.medSAM, imageToSegment);
+                
+                % Use the detected bounding box as a prompt for segmentation
+                boxPrompt = app.detectedBbox;
+                
+                % Perform segmentation using MedSAM
+                app.tumorMask = segmentObjectsFromEmbeddings(app.medSAM, app.imageEmbeddings, imageSize, BoundingBox=boxPrompt);
+                
+                % Display the segmentation result
+                displaySegmentationResult(app);
+                
+                app.StatusLabel.Text = 'Durum: Tümör segmentasyonu tamamlandı.';
+            catch ME
+                uialert(app.UIFigure, ['Segmentasyon sırasında hata: ' ME.message], 'Segmentasyon Hatası');
+                app.StatusLabel.Text = 'Durum: Segmentasyon hatası.';
+                % Show original image in case of error during segmentation
+                imshow(app.originalImage, 'Parent', app.UIAxes);
+                title(app.UIAxes, 'Segmentasyon Hatası');
+            end
+        end
+        
+        % Function to display segmentation results
+        function displaySegmentationResult(app)
+            if isempty(app.tumorMask) || isempty(app.originalImage)
+                return;
+            end
+            
+            % Create a RGB mask for visualization
+            redChannel = zeros(size(app.tumorMask), 'uint8');
+            greenChannel = zeros(size(app.tumorMask), 'uint8');
+            blueChannel = zeros(size(app.tumorMask), 'uint8');
+            
+            % Set red channel for tumor segmentation (adjust alpha for visibility)
+            redChannel(app.tumorMask) = 255;
+            
+            % Create the segmentation overlay
+            segmentationOverlay = cat(3, redChannel, greenChannel, blueChannel);
+            
+            % Overlay segmentation on original image with transparency
+            alpha = 0.3; % Transparency level
+            overlayedImage = app.originalImage;
+            
+            % Apply the mask with transparency
+            for c = 1:3
+                overlayImage = app.originalImage(:,:,c);
+                segmentOverlayChannel = segmentationOverlay(:,:,c);
+                overlayImage(app.tumorMask) = uint8(alpha * double(segmentOverlayChannel(app.tumorMask)) + ...
+                                                  (1-alpha) * double(overlayImage(app.tumorMask)));
+                overlayedImage(:,:,c) = overlayImage;
+            end
+            
+            % Display the result
+            imshow(overlayedImage, 'Parent', app.UIAxes);
+            
+            % Calculate and display segmentation metrics
+            tumorArea = sum(app.tumorMask(:));
+            totalArea = numel(app.tumorMask);
+            percentCoverage = (tumorArea / totalArea) * 100;
+            
+            title(app.UIAxes, sprintf('Tümör Segmentasyonu (Alan: %.2f%%)', percentCoverage));
         end
 
         % Button pushed function: LoadImageButton
@@ -140,7 +266,7 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
 
             app.StatusLabel.Text = 'Durum: Tümör tespit ediliyor...';
             drawnow;
-        
+
             try
                 % Preprocess the image
                 preprocessImageForDetection(app);
@@ -148,7 +274,7 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
                     app.StatusLabel.Text = 'Durum: Görüntü ön işlenemedi.';
                     return;
                 end
-        
+
                 % Detect tumors with initial threshold
                 [bboxes, scores, labels] = detect(app.yoloDetector, app.processedImage, 'Threshold', 0.4);
                 
@@ -177,14 +303,25 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
                     scaledBbox(3) = bestBbox(3) * scaleX;                 % width
                     scaledBbox(4) = bestBbox(4) * scaleY;                 % height
                     
+                    % Save detected bbox for segmentation
+                    app.detectedBbox = scaledBbox;
+                    
+                    % Enable segment button if MedSAM is available
+                    if ~isempty(app.medSAM)
+                        app.SegmentTumorButton.Enable = 'on';
+                    end
+                    
                     % Sadece ölçeklendirilmiş en iyi tespiti görüntüle
                     displayImage = insertObjectAnnotation(app.originalImage, 'rectangle', scaledBbox, cellstr(bestLabel), ...
                                                           'TextBoxOpacity', 0.9, 'FontSize', 16, 'LineWidth', 3, ...
                                                           'Color', 'red');
                     imshow(displayImage, 'Parent', app.UIAxes);
                     title(app.UIAxes, sprintf('Tümör tespit edildi (Güven: %.2f%%)', maxScore*100));
-                    app.StatusLabel.Text = 'Durum: Tümör tespit edildi.';
+                    app.StatusLabel.Text = 'Durum: Tümör tespit edildi. Segmentasyon için butona basın.';
                 else
+                    % Disable segment button if no tumor detected
+                    app.SegmentTumorButton.Enable = 'off';
+                    app.detectedBbox = [];
                     title(app.UIAxes, 'Tümör tespit edilemedi');
                     app.StatusLabel.Text = 'Durum: Tümör tespit edilemedi.';
                 end
@@ -197,6 +334,12 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
                 imshow(app.originalImage, 'Parent', app.UIAxes);
                 title(app.UIAxes, 'Tespit Hatası');
             end
+        end
+        
+        % Button pushed function: SegmentTumorButton
+        function SegmentTumorButtonPushed(app, event)
+            % Call the segmentation method
+            segmentTumorWithMedSAM(app);
         end
     end
 
@@ -227,6 +370,13 @@ classdef TumorDetectorSegmenterApp < matlab.apps.AppBase
             app.DetectTumorsButton.Position = [190 40 150 30];
             app.DetectTumorsButton.Text = 'Tümörleri Tespit Et';
 
+            % Create SegmentTumorButton
+            app.SegmentTumorButton = uibutton(app.UIFigure, 'push');
+            app.SegmentTumorButton.ButtonPushedFcn = createCallbackFcn(app, @SegmentTumorButtonPushed, true);
+            app.SegmentTumorButton.Position = [360 40 150 30];
+            app.SegmentTumorButton.Text = 'Tümörü Segmente Et';
+            app.SegmentTumorButton.Enable = 'off'; % Initially disabled until tumor is detected
+        
             % Create StatusLabel
             app.StatusLabel = uilabel(app.UIFigure);
             app.StatusLabel.Position = [20 10 610 22];

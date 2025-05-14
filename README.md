@@ -1,4 +1,32 @@
-# Brain Tumor Classifier
+# Brain Tumor Detector and Segmenter
+
+This MATLAB application provides tools for detecting and segmenting brain tumors in medical images.
+
+## Features
+- Load medical images from various formats (JPG, PNG, TIFF, etc.)
+- Tumor detection using a pre-trained YOLOv2 model
+- Tumor segmentation using Medical Segment Anything Model (MedSAM)
+- Visualization of results with bounding boxes and segmentation overlays
+- Metrics for segmented tumor area percentage
+
+## Requirements
+- MATLAB (R2024b or newer)
+- Computer Vision Toolbox
+- Deep Learning Toolbox
+- Medical Imaging Toolbox
+- Medical Imaging Toolbox Model for MedSAM
+
+## Usage
+1. Launch `TumorDetectorSegmenterApp.m`
+2. Click "Load Image" to select a medical image
+3. Click "Detect Tumors" to identify tumors in the image
+4. If a tumor is detected, click "Segment Tumor" for detailed segmentation
+
+## Implementation Details
+- The application uses YOLOv2 for initial tumor detection
+- MedSAM (Medical Segment Anything Model) is used for precise segmentation
+- Detected tumors are highlighted with a red bounding box
+- Segmented tumors are displayed with a semi-transparent red overlay
 
 MATLAB-based brain tumor classification project using deep learning approaches.
 
