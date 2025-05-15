@@ -154,6 +154,22 @@ featureLayer = 'block_12_add';
 
 lgraph = yolov2Layers(inputSize, numel(classes), anchorBoxes, net, featureLayer);
 
+% Analyze Network Architecture (Opens a new window)
+disp('Analyzing network architecture...');
+analyzeNetwork(lgraph);
+disp('Network analysis window opened.');
+
+% Open Network in Deep Network Designer (Opens the App)
+disp('Opening Deep Network Designer...');
+try
+    deepNetworkDesigner(lgraph);
+    disp('Deep Network Designer launched with the defined layers.');
+    disp('Use the "Analyze" button within the app for further details.');
+catch ME
+    warning('Could not automatically open Deep Network Designer. Error: %s', ME.message);
+    disp('You can still manually open Deep Network Designer from the MATLAB Apps tab and import the `layers` variable.');
+end
+
 options = trainingOptions('adam', ...
     'MiniBatchSize',16, ...
     'InitialLearnRate',0.0001, ...
@@ -164,9 +180,11 @@ options = trainingOptions('adam', ...
     'ValidationFrequency',50, ...
     'Plots','training-progress');
 
- [detector, info] = trainYOLOv2ObjectDetector(trainingData, lgraph, options);
-
- save('trainedYOLOv2TumorDetector.mat', 'detector');
+% Uncomment these lines to train the model
+% [detector, info] = trainYOLOv2ObjectDetector(trainingData, lgraph, options);
+% 
+% % Save the trained detector
+% save('trainedYOLOv2TumorDetector.mat', 'detector');
 
 disp('Eğitim tamamlandı ve model kaydedildi: trainedYOLOv2TumorDetector.mat');
 
@@ -414,69 +432,9 @@ end
 sgtitle('Sample Detection Results with Ground Truth (Green) and Detections (Red/Blue)', 'FontSize', 12);
 
 
-% Create PR curve
-figure('Name', 'Precision-Recall Curve and Metrics', 'Position', [100, 100, 1200, 500]);
-
-% Plot PR curve
-subplot(1, 3, 1);
-if ~isempty(recall) && ~isempty(precision)
-    plot(recall, precision, 'b-', 'LineWidth', 2);
-    hold on;
-    scatter(overallRecall, overallPrecision, 100, 'ro', 'filled'); % Using overall P/R from per-image counts
-    xlabel('Recall');
-    ylabel('Precision');
-    title(sprintf('Precision-Recall Curve (AP=%.4f)', ap));
-    grid on;
-    legend('PR Curve', 'Overall P/R Point', 'Location', 'southwest');
-    axis([0 1 0 1]);
-else
-    text(0.5, 0.5, 'Not enough data for PR curve', 'HorizontalAlignment', 'center');
-    title('Precision-Recall Curve');
-    axis([0 1 0 1]);
-    grid on;
-end
-
-
-% Create metrics visualization (Bar Chart)
-subplot(1, 3, 2);
-metricNames = {'Precision', 'Recall', 'F1 Score', 'AP'};
-metricValues = [overallPrecision, overallRecall, f1Score, ap];
-barHandle = bar(metricValues);
-set(gca, 'XTickLabel', metricNames);
-ylim([0 1.05]); % Extend y-limit slightly for text
-grid on;
-title('Overall Performance Metrics');
-% Add text labels on top of bars
-for k=1:length(metricValues)
-    text(k, metricValues(k), sprintf('%.3f', metricValues(k)),...
-        'HorizontalAlignment','center', 'VerticalAlignment','bottom');
-end
-
-% NEW: Confidence Score Distribution for TPs and FPs
-subplot(1, 3, 3);
-tp_scores = sortedScores(sortedIsTP == 1);
-fp_scores = sortedScores(sortedIsTP == 0);
-
-if ~isempty(tp_scores) || ~isempty(fp_scores)
-    hold on; % Hold on before plotting histograms
-    if ~isempty(fp_scores)
-        histogram(fp_scores, 'FaceColor', 'r', 'FaceAlpha', 0.7, 'EdgeColor', 'none', 'DisplayName', sprintf('FP Scores (N=%d)', numel(fp_scores)));
-    end
-    if ~isempty(tp_scores)
-        histogram(tp_scores, 'FaceColor', 'b', 'FaceAlpha', 0.7, 'EdgeColor', 'none', 'DisplayName', sprintf('TP Scores (N=%d)', numel(tp_scores)));
-    end
-    hold off; % Release hold after plotting
-    xlabel('Confidence Score');
-    ylabel('Number of Detections');
-    title('Confidence Score Distribution (TP vs FP)');
-    legend('show', 'Location', 'northeast');
-    grid on;
-else
-    text(0.5, 0.5, 'No detections to show score distribution', 'HorizontalAlignment', 'center');
-    title('Confidence Score Distribution');
-    grid on;
-end
-sgtitle('Model Evaluation Metrics and Score Analysis', 'FontSize', 14);
+% Generate clear, concise visualizations of model performance metrics using our functions
+visualizeModelMetrics(precision, recall, ap, overallPrecision, overallRecall, f1Score);
+visualizeConfidenceDistribution(sortedScores, sortedIsTP);
 
 
 % Create a results table to display
@@ -486,9 +444,257 @@ resultTable = table(overallPrecision, overallRecall, f1Score, ap, ...
     'TotalTP_perImage', 'TotalFP_perImage', 'TotalFN_perImage', 'TotalGroundTruth', 'TotalDetectionsMade'});
 disp(resultTable);
 
+% Generate concise visualizations of model performance metrics
+fprintf('\nOluşturuluyor: Ağ eğitim grafikleri ve model performans metrikleri...\n');
+
+% If we have training info, visualize the training progress
+if exist('info', 'var') && isstruct(info)
+    visualizeTrainingProgress(info);
+end
+
+% Visualize model evaluation metrics
+visualizeModelMetrics(precision, recall, ap, overallPrecision, overallRecall, f1Score);
+
+% Visualize confidence score distributions
+visualizeConfidenceDistribution(sortedScores, sortedIsTP);
+
+% Generate comprehensive dashboard with all metrics in one view
+createMetricsDashboard(ap, precision, recall, overallPrecision, overallRecall, f1Score, ...
+                       sortedScores, sortedIsTP, totalTP, totalFP, totalFN, totalGT);
+
+fprintf('Görselleştirmeler tamamlandı. Grafikler ayrı pencerede gösteriliyor.\n');
+
 % Save evaluation results
 save('yolov2_tumor_detector_evaluation_best_only.mat', 'resultTable', 'ap', 'precision', 'recall', ...
     'overallPrecision', 'overallRecall', 'f1Score', 'sortedScores', 'sortedIsTP', 'confidenceThreshold', 'iouThreshold');
+
+% Function to visualize network training information and metrics
+function visualizeTrainingProgress(trainInfo)
+    % Create a figure with two subplots for network training graphs
+    figure('Name', 'Ağ Eğitim Grafikleri', 'Position', [100, 100, 900, 400]);
+    
+    % Loss values over iterations
+    subplot(1, 2, 1);
+    plot(trainInfo.TrainingLoss, 'b-', 'LineWidth', 1.5);
+    hold on;
+    plot(trainInfo.ValidationLoss, 'r-', 'LineWidth', 1.5);
+    xlabel('İterasyon');
+    ylabel('Kayıp Değeri (Loss)');
+    title('Eğitim ve Validasyon Kayıp Değerleri');
+    legend('Eğitim Kaybı', 'Validasyon Kaybı');
+    grid on;
+    
+    % Training accuracy over iterations
+    subplot(1, 2, 2);
+    plot(trainInfo.TrainingAccuracy, 'b-', 'LineWidth', 1.5);
+    hold on;
+    if isfield(trainInfo, 'ValidationAccuracy')
+        plot(trainInfo.ValidationAccuracy, 'r-', 'LineWidth', 1.5);
+        legend('Eğitim Doğruluğu', 'Validasyon Doğruluğu');
+    else
+        legend('Eğitim Doğruluğu');
+    end
+    xlabel('İterasyon');
+    ylabel('Doğruluk (%)');
+    title('Eğitim Doğruluk Değerleri');
+    grid on;
+end
+
+% Function to visualize model performance metrics
+function visualizeModelMetrics(precision, recall, ap, overallPrecision, overallRecall, f1Score)
+    % Create a figure for model performance metrics
+    figure('Name', 'Model Performans Metrikleri', 'Position', [100, 100, 1000, 400]);
+    
+    % Plot PR curve
+    subplot(1, 2, 1);
+    plot(recall, precision, 'b-', 'LineWidth', 2);
+    hold on;
+    scatter(overallRecall, overallPrecision, 100, 'ro', 'filled');
+    xlabel('Recall');
+    ylabel('Precision');
+    title(sprintf('Precision-Recall Eğrisi (AP=%.4f)', ap));
+    grid on;
+    legend('PR Eğrisi', 'Ortalama P/R Noktası', 'Location', 'southwest');
+    axis([0 1 0 1]);
+    
+    % Create bar chart for metrics
+    subplot(1, 2, 2);
+    metricNames = {'Precision', 'Recall', 'F1 Score', 'AP'};
+    metricValues = [overallPrecision, overallRecall, f1Score, ap];
+    barHandle = bar(metricValues);
+    barHandle.FaceColor = 'flat';
+    barHandle.CData(1,:) = [0.2 0.6 0.8];
+    barHandle.CData(2,:) = [0.8 0.4 0.2];
+    barHandle.CData(3,:) = [0.2 0.8 0.4];
+    barHandle.CData(4,:) = [0.6 0.2 0.8];
+    set(gca, 'XTickLabel', metricNames);
+    ylim([0 1.05]);
+    grid on;
+    title('Genel Performans Metrikleri');
+    % Add value labels on top of bars
+    for k=1:length(metricValues)
+        text(k, metricValues(k)+0.02, sprintf('%.3f', metricValues(k)),...
+            'HorizontalAlignment','center', 'VerticalAlignment','bottom', 'FontWeight', 'bold');
+    end
+end
+
+% Function to visualize confidence score distributions and confusion matrix for detections
+function visualizeConfidenceDistribution(sortedScores, sortedIsTP)
+    % Create figure for confidence score distribution
+    figure('Name', 'Deteksiyon Güven Skoru Dağılımı', 'Position', [100, 100, 800, 400]);
+    
+    % Extract TP and FP scores
+    tp_scores = sortedScores(sortedIsTP == 1);
+    fp_scores = sortedScores(sortedIsTP == 0);
+    
+    % Plot score distributions as histograms
+    if ~isempty(tp_scores) || ~isempty(fp_scores)
+        hold on;
+        if ~isempty(fp_scores)
+            histogram(fp_scores, 10, 'FaceColor', 'r', 'FaceAlpha', 0.7, 'EdgeColor', 'none', 'DisplayName', sprintf('FP Skorları (N=%d)', numel(fp_scores)));
+        end
+        if ~isempty(tp_scores)
+            histogram(tp_scores, 10, 'FaceColor', 'b', 'FaceAlpha', 0.7, 'EdgeColor', 'none', 'DisplayName', sprintf('TP Skorları (N=%d)', numel(tp_scores)));
+        end
+        hold off;
+        xlabel('Güven Skoru');
+        ylabel('Tespit Sayısı');
+        title('Güven Skoru Dağılımı (TP vs FP)');
+        legend('show', 'Location', 'northeast');
+        grid on;
+        xlim([0 1]);
+    else
+        text(0.5, 0.5, 'Gösterilecek tespit skoru bulunamadı', 'HorizontalAlignment', 'center');
+        title('Güven Skoru Dağılımı');
+        grid on;
+    end
+end
+
+% Function to create a comprehensive metrics dashboard
+function createMetricsDashboard(ap, precision, recall, overallPrecision, overallRecall, f1Score, sortedScores, sortedIsTP, totalTP, totalFP, totalFN, totalGT)
+    % Create a single figure with multiple subplots for a comprehensive dashboard
+    figure('Name', 'Tümör Detektörü Performans Metrikleri', 'Position', [50, 50, 1200, 700]);
+    
+    % 1. Precision-Recall curve
+    subplot(2, 3, 1);
+    plot(recall, precision, 'b-', 'LineWidth', 2);
+    hold on;
+    scatter(overallRecall, overallPrecision, 100, 'ro', 'filled');
+    xlabel('Recall');
+    ylabel('Precision');
+    title(sprintf('Precision-Recall Eğrisi (AP=%.4f)', ap));
+    grid on;
+    legend('PR Eğrisi', 'Ortalama P/R', 'Location', 'southwest');
+    axis([0 1 0 1]);
+    
+    % 2. Performance metrics bar chart
+    subplot(2, 3, 2);
+    metricNames = {'Precision', 'Recall', 'F1 Score', 'AP'};
+    metricValues = [overallPrecision, overallRecall, f1Score, ap];
+    barHandle = bar(metricValues);
+    barHandle.FaceColor = 'flat';
+    barHandle.CData(1,:) = [0.2 0.6 0.8]; % Custom colors
+    barHandle.CData(2,:) = [0.8 0.4 0.2];
+    barHandle.CData(3,:) = [0.2 0.8 0.4];
+    barHandle.CData(4,:) = [0.6 0.2 0.8];
+    set(gca, 'XTickLabel', metricNames);
+    ylim([0 1.05]);
+    grid on;
+    title('Performans Metrikleri');
+    for k=1:length(metricValues)
+        text(k, metricValues(k)+0.02, sprintf('%.3f', metricValues(k)),...
+            'HorizontalAlignment','center', 'VerticalAlignment','bottom', 'FontWeight', 'bold');
+    end
+    
+    % 3. Confidence score distribution
+    subplot(2, 3, 3);
+    tp_scores = sortedScores(sortedIsTP == 1);
+    fp_scores = sortedScores(sortedIsTP == 0);
+    
+    if ~isempty(tp_scores) || ~isempty(fp_scores)
+        hold on;
+        if ~isempty(fp_scores)
+            histogram(fp_scores, 10, 'FaceColor', 'r', 'FaceAlpha', 0.7, 'EdgeColor', 'none', ...
+                'DisplayName', sprintf('Yanlış Pozitifler (N=%d)', numel(fp_scores)));
+        end
+        if ~isempty(tp_scores)
+            histogram(tp_scores, 10, 'FaceColor', 'b', 'FaceAlpha', 0.7, 'EdgeColor', 'none', ...
+                'DisplayName', sprintf('Doğru Pozitifler (N=%d)', numel(tp_scores)));
+        end
+        hold off;
+        xlabel('Güven Skoru');
+        ylabel('Tespit Sayısı');
+        title('Güven Skoru Dağılımı');
+        legend('show', 'Location', 'northeast');
+        grid on;
+        xlim([0 1]);
+    else
+        text(0.5, 0.5, 'Gösterilecek tespit skoru bulunamadı', 'HorizontalAlignment', 'center');
+        title('Güven Skoru Dağılımı');
+        grid on;
+    end
+    
+    % 4. Confusion metrics pie chart (TP, FP, FN)
+    subplot(2, 3, 4);
+    confusionData = [totalTP, totalFP, totalFN];
+    labels = {sprintf('TP: %d', totalTP), sprintf('FP: %d', totalFP), sprintf('FN: %d', totalFN)};
+    explode = [0.1 0.1 0.1];
+    pie(confusionData, explode, labels);
+    title('Tespit Sonuçları Dağılımı');
+    colormap([0 0.4470 0.7410; 0.8500 0.3250 0.0980; 0.9290 0.6940 0.1250]); % Blue, Orange, Yellow
+    
+    % 5. Recall by confidence threshold simulation
+    subplot(2, 3, 5);
+    thresholds = 0:0.1:1;
+    recalls = zeros(size(thresholds));
+    
+    % Simulate different confidence thresholds and calculate recall
+    for i = 1:length(thresholds)
+        thresh = thresholds(i);
+        detections_above_thresh = sum(sortedScores >= thresh);
+        
+        if detections_above_thresh > 0
+            tp_above_thresh = sum(sortedIsTP(sortedScores >= thresh));
+            recalls(i) = tp_above_thresh / totalGT;
+        else
+            recalls(i) = 0;
+        end
+    end
+    
+    plot(thresholds, recalls, 'g-o', 'LineWidth', 2, 'MarkerFaceColor', 'g');
+    xlabel('Güven Eşiği');
+    ylabel('Recall');
+    title('Güven Eşiği vs. Recall');
+    grid on;
+    ylim([0 1]);
+    
+    % 6. Precision by confidence threshold simulation
+    subplot(2, 3, 6);
+    precisions = zeros(size(thresholds));
+    
+    % Simulate different confidence thresholds and calculate precision
+    for i = 1:length(thresholds)
+        thresh = thresholds(i);
+        detections_above_thresh = sum(sortedScores >= thresh);
+        
+        if detections_above_thresh > 0
+            tp_above_thresh = sum(sortedIsTP(sortedScores >= thresh));
+            precisions(i) = tp_above_thresh / detections_above_thresh;
+        else
+            precisions(i) = 1; % No detections means no false positives
+        end
+    end
+    
+    plot(thresholds, precisions, 'm-o', 'LineWidth', 2, 'MarkerFaceColor', 'm');
+    xlabel('Güven Eşiği');
+    ylabel('Precision');
+    title('Güven Eşiği vs. Precision');
+    grid on;
+    ylim([0 1]);
+    
+    % Add overall title
+    sgtitle('Tümör Detektörü MAP ve F1 Değerlendirme Sonuçları', 'FontSize', 14, 'FontWeight', 'bold');
+end
 
 % Function to evaluate detections for a single image - best detection only approach
 function [tp, fp, fn, matchedGT, matchedDet] = evaluateDetectionForImage(detections, groundTruth, iouThreshold)
