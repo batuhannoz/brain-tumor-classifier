@@ -9,6 +9,20 @@ This MATLAB application provides tools for detecting and segmenting brain tumors
 - Visualization of results with bounding boxes and segmentation overlays
 - Metrics for segmented tumor area percentage
 
+## Sample Images
+
+### Sample Tumor
+![Sample Tumor](sample_tumor.png)
+
+### YOLOv2 Detection
+![YOLO Detection](yolo_detection.png)
+
+### Tumor Segmentation
+![Tumor Segmentation](segmentation.png)
+
+### Ground Truth vs Detections
+![Ground Truth vs Detections](ground_truth_vs_detections_test.png)
+
 ## Requirements
 - MATLAB (R2024b or newer)
 - Computer Vision Toolbox
